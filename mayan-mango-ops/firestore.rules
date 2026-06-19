@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: get the caller's role from /usuarios/{uid}
+    function role() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin()    { return role() == 'admin'; }
+    function isOperador() { return role() == 'operador' || isAdmin(); }
+    function isAuth()     { return request.auth != null; }
+
+    // ── Contratos ────────────────────────────────────────────
+    match /contratos/{id} {
+      allow read:   if isAuth();
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+                    // operadores solo pueden tocar el campo preparacion
+                    || (isOperador() &&
+                        request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['preparacion']));
+      allow delete: if isAdmin();
+    }
+
+    // ── Flota ────────────────────────────────────────────────
+    match /flota/{id} {
+      allow read:   if isAuth();
+      allow write:  if isAdmin();
+    }
+
+    // ── Usuarios ─────────────────────────────────────────────
+    match /usuarios/{uid} {
+      allow read:   if isAuth();
+      allow write:  if isAdmin();
+    }
+  }
+}
