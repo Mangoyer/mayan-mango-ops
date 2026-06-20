@@ -1,7 +1,7 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import {
-  CalendarDays, Wrench, Car, FileText, Users, LogOut, Menu, X, Settings
+  CalendarDays, Wrench, Car, FileText, Users, LogOut, Menu, X, Settings, Building2, LayoutGrid
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -9,7 +9,9 @@ const nav = [
   { to: '/agenda',      label: 'Agenda',         icon: CalendarDays },
   { to: '/preparacion', label: 'Preparación',    icon: Wrench       },
   { to: '/flota',       label: 'Disponibilidad', icon: Car          },
+  { to: '/mapa',        label: 'Mapa de flota',  icon: LayoutGrid   },
   { to: '/contratos',   label: 'Contratos',      icon: FileText     },
+  { to: '/empresarial', label: 'Empresarial',    icon: Building2    },
 ]
 
 function NavItem({ to, label, Icon, onClick }) {

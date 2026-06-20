@@ -11,6 +11,8 @@ import Contratos   from './pages/Contratos'
 import ContratoDetalle from './pages/ContratoDetalle'
 import Usuarios    from './pages/Usuarios'
 import Configuracion from './pages/Configuracion'
+import ServiciosEmpresariales from './pages/ServiciosEmpresariales'
+import MapaFlota from './pages/MapaFlota'
 import './index.css'
 
 function PrivateRoute({ children }) {
@@ -43,6 +45,8 @@ function App() {
             <Route path="flota"    element={<Flota />} />
             <Route path="contratos" element={<Contratos />} />
             <Route path="contratos/:id" element={<ContratoDetalle />} />
+            <Route path="empresarial" element={<ServiciosEmpresariales />} />
+            <Route path="mapa" element={<MapaFlota />} />
             <Route path="usuarios"  element={<Usuarios />} />
             <Route path="configuracion" element={<Configuracion />} />
           </Route>

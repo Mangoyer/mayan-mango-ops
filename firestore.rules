@@ -34,5 +34,19 @@ service cloud.firestore {
       allow read:   if isAuth();
       allow write:  if isAdmin();
     }
+
+    // ── Servicios empresariales (auto sustituto / renta por periodo) ──
+    match /serviciosEmpresariales/{id} {
+      allow read:   if isAuth();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Configuración (WhatsApp, Google Calendar) ─────────────
+    match /config/{doc} {
+      allow read:   if isAuth();
+      allow write:  if isAdmin();
+    }
   }
 }

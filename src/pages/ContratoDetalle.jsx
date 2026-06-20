@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { doc, getDoc } from 'firebase/firestore'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { ArrowLeft, Trash2, Edit2, MapPin, Clock, Car, User, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Trash2, Edit2, MapPin, Clock, Car, Phone, Mail, AlertCircle, Plane } from 'lucide-react'
 import { db } from '../lib/firebase'
 import { updateContrato, deleteContrato } from '../hooks/useFirestore'
 import { useAuth } from '../contexts/AuthContext'
@@ -17,14 +17,21 @@ function dateOf(val) {
 }
 
 const VEHICULOS = [
- 'Dodge Attitude','Mitsubishi Xpander Cross','Toyota Corolla',
+  'Dodge Attitude','Mitsubishi Xpander Cross','Toyota Corolla',
   'Dodge Grand Caravan','Toyota Hiace',
   'Mitsubishi Outlander','Mitsubishi L200','Mitsubishi Montero Limited',
 ]
-const LUGARES = [
-  'Aeropuerto CUN T2','Aeropuerto CUN T3','Hotel Grand Hyatt',
-  'Playa del Carmen — Oficinas','Tulum — Zona Hotelera',
-  'Cancún — Torre Ejecutiva','Hotel Xcaret Arte','Otro',
+const PUNTOS = [
+  'Aeropuerto Cancún (CUN)',
+  'Aeropuerto Tulum (TQO)',
+  'Zona Hotelera Cancún',
+  'Playa del Carmen',
+  'Airbnb Tulum',
+  'Otro',
+]
+const TIPO_SERVICIO = [
+  { value: 'directo',  label: 'Entrega directa en punto' },
+  { value: 'traslado', label: 'Traslado aeropuerto + entrega' },
 ]
 
 function InfoRow({ icon: Icon, label, value }) {
@@ -58,17 +65,23 @@ export default function ContratoDetalle() {
         const data = { id: snap.id, ...snap.data() }
         setContrato(data)
         setForm({
-          folio:            data.folio            ?? '',
-          cliente:          data.cliente          ?? '',
-          vehiculo:         data.vehiculo         ?? VEHICULOS[0],
-          placa:            data.placa            ?? '',
-          fechaEntrega:     data.fechaEntrega     ?? '',
-          hora:             data.hora             ?? '',
-          lugarEntrega:     data.lugarEntrega     ?? LUGARES[0],
-          fechaDevolucion:  data.fechaDevolucion  ?? '',
-          lugarDevolucion:  data.lugarDevolucion  ?? LUGARES[0],
-          notas:            data.notas            ?? '',
-          urgente:          data.urgente          ?? false,
+          folio:               data.folio               ?? '',
+          cliente:             data.cliente              ?? '',
+          telefono:            data.telefono              ?? '',
+          email:               data.email                 ?? '',
+          vehiculo:            data.vehiculo              ?? VEHICULOS[0],
+          placa:               data.placa                 ?? '',
+          fechaEntrega:        data.fechaEntrega          ?? '',
+          hora:                data.hora                  ?? '',
+          tipoServicioEntrega: data.tipoServicioEntrega    ?? 'directo',
+          lugarEntrega:        data.lugarEntrega           ?? PUNTOS[0],
+          vueloAerolinea:      data.vuelo?.aerolinea       ?? '',
+          vueloNumero:         data.vuelo?.numero          ?? '',
+          vueloHoraLlegada:    data.vuelo?.horaLlegada     ?? '',
+          fechaDevolucion:     data.fechaDevolucion        ?? '',
+          lugarDevolucion:     data.lugarDevolucion        ?? PUNTOS[0],
+          notas:               data.notas                  ?? '',
+          urgente:             data.urgente                ?? false,
         })
       }
       setLoading(false)
@@ -76,8 +89,29 @@ export default function ContratoDetalle() {
   }, [id])
 
   async function handleSave() {
-    await updateContrato(id, form)
-    setContrato(c => ({ ...c, ...form }))
+    const payload = {
+      folio: form.folio,
+      cliente: form.cliente,
+      telefono: form.telefono,
+      email: form.email,
+      vehiculo: form.vehiculo,
+      placa: form.placa,
+      fechaEntrega: form.fechaEntrega,
+      hora: form.hora,
+      tipoServicioEntrega: form.tipoServicioEntrega,
+      lugarEntrega: form.lugarEntrega,
+      vuelo: form.tipoServicioEntrega === 'traslado' ? {
+        aerolinea: form.vueloAerolinea,
+        numero: form.vueloNumero,
+        horaLlegada: form.vueloHoraLlegada,
+      } : null,
+      fechaDevolucion: form.fechaDevolucion,
+      lugarDevolucion: form.lugarDevolucion,
+      notas: form.notas,
+      urgente: form.urgente,
+    }
+    await updateContrato(id, payload)
+    setContrato(c => ({ ...c, ...payload }))
     setEditOpen(false)
   }
 
@@ -93,6 +127,7 @@ export default function ContratoDetalle() {
 
   const fe = dateOf(contrato.fechaEntrega)
   const fd = dateOf(contrato.fechaDevolucion)
+  const esTraslado = contrato.tipoServicioEntrega === 'traslado'
 
   return (
     <div className="p-4 sm:p-6 max-w-xl mx-auto">
@@ -109,6 +144,7 @@ export default function ContratoDetalle() {
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-lg font-semibold text-gray-900">{contrato.folio}</h1>
+            {esTraslado && <Badge color="blue">✈️ Traslado</Badge>}
             {contrato.urgente && <Badge color="red">Urgente</Badge>}
           </div>
           <p className="text-sm text-gray-500 mt-0.5">{contrato.cliente}</p>
@@ -129,13 +165,34 @@ export default function ContratoDetalle() {
         )}
       </div>
 
-      {/* Info */}
+      {/* Contacto del cliente */}
+      {(contrato.telefono || contrato.email) && (
+        <div className="card p-4 mb-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Contacto del cliente</p>
+          <InfoRow icon={Phone} label="Teléfono" value={contrato.telefono} />
+          <InfoRow icon={Mail}  label="Email"    value={contrato.email} />
+        </div>
+      )}
+
+      {/* Info del servicio */}
       <div className="card p-4 mb-4">
-        <InfoRow icon={Car}     label="Vehículo"           value={`${contrato.vehiculo} · ${contrato.placa}`} />
-        <InfoRow icon={Clock}   label="Fecha de entrega"   value={fe ? format(fe, "EEEE d 'de' MMMM yyyy", { locale: es }) + (contrato.hora ? ` — ${contrato.hora}` : '') : null} />
-        <InfoRow icon={MapPin}  label="Lugar de entrega"   value={contrato.lugarEntrega} />
-        <InfoRow icon={Clock}   label="Fecha de devolución"value={fd ? format(fd, "EEEE d 'de' MMMM yyyy", { locale: es }) : null} />
-        <InfoRow icon={MapPin}  label="Lugar de devolución"value={contrato.lugarDevolucion} />
+        <InfoRow icon={Car}     label="Vehículo"            value={`${contrato.vehiculo} · ${contrato.placa}`} />
+        <InfoRow icon={Clock}   label="Fecha de entrega"    value={fe ? format(fe, "EEEE d 'de' MMMM yyyy", { locale: es }) + (contrato.hora ? ` — ${contrato.hora}` : '') : null} />
+        <InfoRow icon={MapPin}  label={esTraslado ? 'Punto de entrega final' : 'Lugar de entrega'} value={contrato.lugarEntrega} />
+        {esTraslado && contrato.vuelo && (
+          <div className="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0">
+            <Plane size={16} className="text-blue-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-xs text-gray-400 leading-none mb-0.5">Vuelo del cliente</p>
+              <p className="text-sm text-gray-800">
+                {contrato.vuelo.aerolinea} {contrato.vuelo.numero}
+                {contrato.vuelo.horaLlegada && ` — llega ${contrato.vuelo.horaLlegada}`}
+              </p>
+            </div>
+          </div>
+        )}
+        <InfoRow icon={Clock}   label="Fecha de devolución" value={fd ? format(fd, "EEEE d 'de' MMMM yyyy", { locale: es }) : null} />
+        <InfoRow icon={MapPin}  label="Lugar de devolución" value={contrato.lugarDevolucion} />
         {contrato.notas && (
           <InfoRow icon={AlertCircle} label="Notas" value={contrato.notas} />
         )}
@@ -168,9 +225,20 @@ export default function ContratoDetalle() {
               </label>
             </Field>
           </div>
+
           <Field label="Cliente">
             <input className="input" value={form.cliente} onChange={e => set('cliente', e.target.value)} />
           </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Teléfono del cliente">
+              <input className="input" value={form.telefono} onChange={e => set('telefono', e.target.value)} placeholder="+1 555 123 4567" />
+            </Field>
+            <Field label="Email del cliente">
+              <input className="input" type="email" value={form.email} onChange={e => set('email', e.target.value)} />
+            </Field>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Vehículo">
               <select className="select" value={form.vehiculo} onChange={e => set('vehiculo', e.target.value)}>
@@ -181,6 +249,7 @@ export default function ContratoDetalle() {
               <input className="input" value={form.placa} onChange={e => set('placa', e.target.value)} />
             </Field>
           </div>
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Fecha entrega">
               <input className="input" type="date" value={form.fechaEntrega} onChange={e => set('fechaEntrega', e.target.value)} />
@@ -189,17 +258,42 @@ export default function ContratoDetalle() {
               <input className="input" type="time" value={form.hora} onChange={e => set('hora', e.target.value)} />
             </Field>
           </div>
-          <Field label="Lugar entrega">
-            <select className="select" value={form.lugarEntrega} onChange={e => set('lugarEntrega', e.target.value)}>
-              {LUGARES.map(l => <option key={l}>{l}</option>)}
+
+          <Field label="Tipo de servicio">
+            <select className="select" value={form.tipoServicioEntrega} onChange={e => set('tipoServicioEntrega', e.target.value)}>
+              {TIPO_SERVICIO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </Field>
+
+          <Field label={form.tipoServicioEntrega === 'traslado' ? 'Punto de entrega final' : 'Lugar de entrega'}>
+            <select className="select" value={form.lugarEntrega} onChange={e => set('lugarEntrega', e.target.value)}>
+              {PUNTOS.map(l => <option key={l}>{l}</option>)}
+            </select>
+          </Field>
+
+          {form.tipoServicioEntrega === 'traslado' && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 flex flex-col gap-3">
+              <p className="text-xs font-semibold text-blue-800">✈️ Datos del vuelo</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Aerolínea">
+                  <input className="input" value={form.vueloAerolinea} onChange={e => set('vueloAerolinea', e.target.value)} />
+                </Field>
+                <Field label="Número de vuelo">
+                  <input className="input" value={form.vueloNumero} onChange={e => set('vueloNumero', e.target.value)} />
+                </Field>
+              </div>
+              <Field label="Hora de llegada">
+                <input className="input" type="time" value={form.vueloHoraLlegada} onChange={e => set('vueloHoraLlegada', e.target.value)} />
+              </Field>
+            </div>
+          )}
+
           <Field label="Fecha devolución">
             <input className="input" type="date" value={form.fechaDevolucion} onChange={e => set('fechaDevolucion', e.target.value)} />
           </Field>
           <Field label="Lugar devolución">
             <select className="select" value={form.lugarDevolucion} onChange={e => set('lugarDevolucion', e.target.value)}>
-              {LUGARES.map(l => <option key={l}>{l}</option>)}
+              {PUNTOS.map(l => <option key={l}>{l}</option>)}
             </select>
           </Field>
           <Field label="Notas">

@@ -167,6 +167,9 @@ export async function generarAgendaDia(contratos, fecha = new Date()) {
         doc.rect(8, y, 1.5, 7, 'F')
       }
 
+      const esTraslado = ev._tipo === 'ENTREGA' && ev.tipoServicioEntrega === 'traslado'
+      const lugarTxt = (ev._tipo === 'ENTREGA' ? ev.lugarEntrega : ev.lugarDevolucion)?.substring(0, 22)
+
       doc.setFontSize(7)
       doc.setFont('helvetica', 'normal')
       doc.setTextColor(...C.texto)
@@ -175,9 +178,18 @@ export async function generarAgendaDia(contratos, fecha = new Date()) {
         ev.folio,
         ev.cliente?.substring(0, 22),
         `${ev.vehiculo?.split(' ')[0]} ${ev.placa}`,
-        (ev._tipo === 'ENTREGA' ? ev.lugarEntrega : ev.lugarDevolucion)?.substring(0, 28),
+        esTraslado ? `✈ ${lugarTxt}` : lugarTxt,
         ev._tipo,
       ], anchos)
+
+      if (esTraslado && ev.vuelo && (ev.vuelo.numero || ev.vuelo.horaLlegada)) {
+        y += 7
+        doc.setFillColor(219, 234, 254)
+        doc.rect(8, y, W - 16, 5, 'F')
+        doc.setFontSize(6.5)
+        doc.setTextColor(30, 64, 175)
+        doc.text(`  ✈ Vuelo ${ev.vuelo.aerolinea ?? ''} ${ev.vuelo.numero ?? ''} — llega ${ev.vuelo.horaLlegada ?? '—'}`, 10, y + 3.5)
+      }
 
       if (ev.notas) {
         y += 7
@@ -324,7 +336,7 @@ export async function generarHojaRuta(c) {
     doc.setTextColor(...C.gris)
     doc.text(titulo.toUpperCase(), 10, yPos + 4.5)
     let cy = yPos + 10
-    contenido.forEach(([lbl, val]) => {
+    contenido.filter(([, val]) => val).forEach(([lbl, val]) => {
       doc.setFontSize(8)
       doc.setFont('helvetica', 'bold')
       doc.setTextColor(...C.gris)
@@ -343,14 +355,33 @@ export async function generarHojaRuta(c) {
   ], y)
 
   y = seccion('Cliente', [
-    ['Nombre',   c.cliente],
+    ['Nombre',     c.cliente],
+    ['Teléfono',   c.telefono],
+    ['Email',      c.email],
   ], y)
 
-  y = seccion('Entrega', [
+  const esTraslado = c.tipoServicioEntrega === 'traslado'
+
+  y = seccion(esTraslado ? 'Traslado + Entrega' : 'Entrega', [
     ['Fecha',    fe ? format(fe, "EEEE d 'de' MMMM yyyy", { locale: es }) : '—'],
     ['Hora',     c.hora ?? '—'],
-    ['Lugar',    c.lugarEntrega],
+    [esTraslado ? 'Punto final' : 'Lugar', c.lugarEntrega],
   ], y)
+
+  if (esTraslado && c.vuelo) {
+    doc.setFillColor(219, 234, 254)
+    doc.roundedRect(8, y, W - 16, 16, 2, 2, 'F')
+    doc.setFontSize(7.5)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(30, 64, 175)
+    doc.text('✈ DATOS DEL VUELO (recoger en aeropuerto)', 12, y + 5)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(...C.texto)
+    doc.setFontSize(8)
+    const vueloTxt = `${c.vuelo.aerolinea ?? ''} ${c.vuelo.numero ?? ''}`.trim() || '—'
+    doc.text(`Vuelo: ${vueloTxt}     Hora de llegada: ${c.vuelo.horaLlegada ?? '—'}`, 12, y + 11)
+    y += 20
+  }
 
   if (fd) {
     y = seccion('Devolución', [

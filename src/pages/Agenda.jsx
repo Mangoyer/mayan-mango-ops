@@ -1,15 +1,43 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { format, isToday, isTomorrow, parseISO, startOfDay, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { MapPin, Clock, Car, AlertCircle, Plus, ChevronRight } from 'lucide-react'
-import { useContratos, addContrato } from '../hooks/useFirestore'
+import { MapPin, Clock, Car, AlertCircle, Plus, ChevronRight, Building2, CheckCircle2 } from 'lucide-react'
+import { collection, query, where, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore'
+import { db } from '../lib/firebase'
+import { useContratos, addContrato, useFlota, updateUnidad } from '../hooks/useFirestore'
 import { useAuth } from '../contexts/AuthContext'
 import { Spinner, KpiCard, Badge, Modal, Field, PageHeader } from '../components/ui'
 import { BtnAgendaDia, BtnAgendaSemana } from '../components/PdfButtons'
+import PdfUploader from '../components/PdfUploader'
 import { Link } from 'react-router-dom'
 
 const TIPO_LABEL  = { entrega: 'Entrega', devolucion: 'Devolución' }
 const TIPO_COLOR  = { entrega: 'orange', devolucion: 'green' }
+const MOTIVO_LABEL = { auto_sustituto: 'Auto sustituto', renta_periodo: 'Renta por periodo' }
+
+// ── Servicios empresariales activos (para integrar en agenda) ──
+function useServiciosActivos() {
+  const [servicios, setServicios] = useState([])
+  useEffect(() => {
+    const q = query(collection(db, 'serviciosEmpresariales'), where('activo', '==', true))
+    const unsub = onSnapshot(q, snap => {
+      setServicios(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    })
+    return unsub
+  }, [])
+  return servicios
+}
+
+async function cerrarServicioDesdeAgenda(id, economico, flota) {
+  await updateDoc(doc(db, 'serviciosEmpresariales', id), {
+    activo: false,
+    fechaCierre: format(new Date(), 'yyyy-MM-dd'),
+  })
+  const unidad = flota.find(u => u.economico === economico)
+  if (unidad) {
+    await updateUnidad(unidad.id, { status: 'disponible', cliente: '', hasta: '' })
+  }
+}
 
 function dateOf(val) {
   if (!val) return null
@@ -43,6 +71,7 @@ function dayLabel(dateStr) {
 
 function ContratoCard({ ev }) {
   const urgente = ev.urgente
+  const esTraslado = ev._tipo === 'entrega' && ev.tipoServicioEntrega === 'traslado'
   return (
     <Link to={`/contratos/${ev.id}`} className="block">
       <div className={`card p-4 flex gap-3 hover:shadow-md transition-shadow cursor-pointer ${urgente ? 'border-l-4 border-l-red-400' : ''}`}>
@@ -60,9 +89,13 @@ function ContratoCard({ ev }) {
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-sm font-medium text-gray-900">{ev.folio}</span>
             <Badge color={TIPO_COLOR[ev._tipo]}>{TIPO_LABEL[ev._tipo]}</Badge>
+            {esTraslado && <Badge color="blue">✈️ Traslado</Badge>}
             {urgente && <Badge color="red">Urgente</Badge>}
           </div>
           <p className="text-sm text-gray-700 font-medium truncate">{ev.cliente}</p>
+          {ev.telefono && (
+            <p className="text-xs text-gray-400 truncate">📞 {ev.telefono}</p>
+          )}
           <div className="flex items-center gap-3 mt-1.5 flex-wrap">
             <span className="text-xs text-gray-500 flex items-center gap-1">
               <Car size={12} />{ev.vehiculo} · {ev.placa}
@@ -74,6 +107,11 @@ function ContratoCard({ ev }) {
           <span className="text-xs text-gray-400 flex items-center gap-1 mt-1">
             <MapPin size={11} />{ev._tipo === 'entrega' ? ev.lugarEntrega : ev.lugarDevolucion}
           </span>
+          {esTraslado && ev.vuelo && (ev.vuelo.numero || ev.vuelo.horaLlegada) && (
+            <span className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-0.5 inline-flex items-center gap-1 mt-1.5">
+              ✈️ {ev.vuelo.aerolinea} {ev.vuelo.numero} {ev.vuelo.horaLlegada && `· llega ${ev.vuelo.horaLlegada}`}
+            </span>
+          )}
           {ev.notas && (
             <span className="text-xs text-amber-700 flex items-center gap-1 mt-1">
               <AlertCircle size={11} />{ev.notas}
@@ -86,23 +124,85 @@ function ContratoCard({ ev }) {
   )
 }
 
+// ── Tarjeta de servicio empresarial dentro de la agenda ────────
+function ServicioEmpresarialCard({ s, esHoy, flota }) {
+  const [closing, setClosing] = useState(false)
+  const dias = Math.floor((new Date() - new Date(s.fechaInicio)) / (1000 * 60 * 60 * 24))
+
+  async function handleCerrar() {
+    setClosing(true)
+    try {
+      await cerrarServicioDesdeAgenda(s.id, s.economico, flota)
+    } finally {
+      setClosing(false)
+    }
+  }
+
+  return (
+    <div className="card p-4 flex gap-3 border-l-4 border-l-amber-400">
+      <div className="flex-shrink-0 w-11 text-center bg-amber-50 rounded-lg pt-2 pb-1.5 flex flex-col items-center justify-center">
+        <Building2 size={18} className="text-amber-500" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap mb-1">
+          <span className="text-sm font-medium text-gray-900">{s.economico}</span>
+          <Badge color="amber">{MOTIVO_LABEL[s.motivo] ?? s.motivo}</Badge>
+          {!esHoy && <Badge color="gray">En curso · día {dias}</Badge>}
+        </div>
+        <p className="text-sm text-gray-700 font-medium truncate">{s.empresa}</p>
+        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+          <span className="text-xs text-gray-500 flex items-center gap-1">
+            <Car size={12} />{s.vehiculo || '—'} {s.placa && `· ${s.placa}`}
+          </span>
+        </div>
+        {s.notas && (
+          <span className="text-xs text-amber-700 flex items-center gap-1 mt-1">
+            <AlertCircle size={11} />{s.notas}
+          </span>
+        )}
+        <button
+          onClick={handleCerrar}
+          disabled={closing}
+          className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-1.5 transition-colors"
+        >
+          <CheckCircle2 size={13} />
+          {closing ? 'Cerrando…' : 'Marcar como devuelto'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Modal nuevo contrato ──────────────────────────────────────
 const VEHICULOS = [
- 'Dodge Attitude','Mitsubishi Xpander Cross','Toyota Corolla',
+  'Dodge Attitude','Mitsubishi Xpander Cross','Toyota Corolla',
   'Dodge Grand Caravan','Toyota Hiace',
   'Mitsubishi Outlander','Mitsubishi L200','Mitsubishi Montero Limited',
 ]
-const LUGARES = [
-  'Aeropuerto CUN T2','Aeropuerto CUN T3','Hotel Grand Hyatt',
-  'Playa del Carmen — Oficinas','Tulum — Zona Hotelera',
-  'Cancún — Torre Ejecutiva','Hotel Xcaret Arte', 'Otro',
+const PUNTOS = [
+  'Aeropuerto Cancún (CUN)',
+  'Aeropuerto Tulum (TQO)',
+  'Zona Hotelera Cancún',
+  'Playa del Carmen',
+  'Airbnb Tulum',
+  'Otro',
+]
+const TIPO_SERVICIO = [
+  { value: 'directo',  label: 'Entrega directa en punto' },
+  { value: 'traslado', label: 'Traslado aeropuerto + entrega' },
 ]
 
 function NuevoContratoModal({ open, onClose }) {
   const empty = {
-    folio:'', cliente:'', vehiculo: VEHICULOS[0], placa:'',
-    fechaEntrega:'', hora:'', lugarEntrega: LUGARES[0],
-    fechaDevolucion:'', lugarDevolucion: LUGARES[0],
+    folio:'', cliente:'', telefono:'', email:'',
+    vehiculo: VEHICULOS[0], placa:'',
+    fechaEntrega:'', hora:'',
+    tipoServicioEntrega: 'directo',
+    puntoEntrega: PUNTOS[0],
+    puntoEntregaOtro: '',
+    vueloAerolinea:'', vueloNumero:'', vueloHoraLlegada:'',
+    fechaDevolucion:'', lugarDevolucion: PUNTOS[0],
+    lugarDevolucionOtro: '',
     notas:'', urgente: false,
   }
   const [form, setForm]     = useState(empty)
@@ -111,6 +211,18 @@ function NuevoContratoModal({ open, onClose }) {
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
+  function aplicarExtraccion(datos) {
+    setForm(f => ({
+      ...f,
+      folio: datos.folio || f.folio,
+      cliente: datos.cliente || f.cliente,
+      placa: datos.placa || f.placa,
+      fechaEntrega: datos.fechaEntrega || f.fechaEntrega,
+      hora: datos.hora || f.hora,
+      fechaDevolucion: datos.fechaDevolucion || f.fechaDevolucion,
+    }))
+  }
+
   async function handleSave() {
     if (!form.folio || !form.cliente || !form.fechaEntrega) {
       setError('Folio, cliente y fecha de entrega son obligatorios.')
@@ -118,7 +230,29 @@ function NuevoContratoModal({ open, onClose }) {
     }
     setSaving(true)
     try {
-      await addContrato(form)
+      const lugarEntrega = form.puntoEntrega === 'Otro' ? form.puntoEntregaOtro : form.puntoEntrega
+      const lugarDevolucion = form.lugarDevolucion === 'Otro' ? form.lugarDevolucionOtro : form.lugarDevolucion
+      await addContrato({
+        folio: form.folio,
+        cliente: form.cliente,
+        telefono: form.telefono,
+        email: form.email,
+        vehiculo: form.vehiculo,
+        placa: form.placa,
+        fechaEntrega: form.fechaEntrega,
+        hora: form.hora,
+        tipoServicioEntrega: form.tipoServicioEntrega,
+        lugarEntrega,
+        vuelo: form.tipoServicioEntrega === 'traslado' ? {
+          aerolinea: form.vueloAerolinea,
+          numero: form.vueloNumero,
+          horaLlegada: form.vueloHoraLlegada,
+        } : null,
+        fechaDevolucion: form.fechaDevolucion,
+        lugarDevolucion,
+        notas: form.notas,
+        urgente: form.urgente,
+      })
       setForm(empty)
       onClose()
     } catch (e) {
@@ -128,9 +262,18 @@ function NuevoContratoModal({ open, onClose }) {
     }
   }
 
+  const esTraslado = form.tipoServicioEntrega === 'traslado'
+
   return (
     <Modal open={open} onClose={onClose} title="Nuevo contrato">
       <div className="flex flex-col gap-4">
+        <PdfUploader
+          tipo="turistico"
+          label="Subir contrato PDF (opcional — autocompleta)"
+          onExtracted={aplicarExtraccion}
+        />
+        <div className="text-center text-xs text-gray-400 -my-1">— o captura manual abajo —</div>
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="Folio">
             <input className="input" value={form.folio} onChange={e => set('folio', e.target.value)} placeholder="747" />
@@ -146,6 +289,15 @@ function NuevoContratoModal({ open, onClose }) {
         <Field label="Cliente">
           <input className="input" value={form.cliente} onChange={e => set('cliente', e.target.value)} placeholder="Nombre o empresa" />
         </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Teléfono del cliente">
+            <input className="input" value={form.telefono} onChange={e => set('telefono', e.target.value)} placeholder="+1 555 123 4567" />
+          </Field>
+          <Field label="Email del cliente">
+            <input className="input" type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="cliente@correo.com" />
+          </Field>
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Vehículo">
@@ -167,11 +319,41 @@ function NuevoContratoModal({ open, onClose }) {
           </Field>
         </div>
 
-        <Field label="Lugar de entrega">
-          <select className="select" value={form.lugarEntrega} onChange={e => set('lugarEntrega', e.target.value)}>
-            {LUGARES.map(l => <option key={l}>{l}</option>)}
+        {/* Tipo de servicio de entrega */}
+        <Field label="Tipo de servicio">
+          <select className="select" value={form.tipoServicioEntrega} onChange={e => set('tipoServicioEntrega', e.target.value)}>
+            {TIPO_SERVICIO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </Field>
+
+        <Field label={esTraslado ? 'Punto de entrega final (destino del traslado)' : 'Punto de entrega'}>
+          <select className="select" value={form.puntoEntrega} onChange={e => set('puntoEntrega', e.target.value)}>
+            {PUNTOS.map(l => <option key={l}>{l}</option>)}
+          </select>
+        </Field>
+        {form.puntoEntrega === 'Otro' && (
+          <Field label="Especifica el punto de entrega">
+            <input className="input" value={form.puntoEntregaOtro} onChange={e => set('puntoEntregaOtro', e.target.value)} placeholder="Dirección o nombre del lugar" />
+          </Field>
+        )}
+
+        {/* Datos de vuelo — solo si hay traslado */}
+        {esTraslado && (
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 flex flex-col gap-3">
+            <p className="text-xs font-semibold text-blue-800">✈️ Datos del vuelo (para coordinar el traslado)</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Aerolínea">
+                <input className="input" value={form.vueloAerolinea} onChange={e => set('vueloAerolinea', e.target.value)} placeholder="Ej. American Airlines" />
+              </Field>
+              <Field label="Número de vuelo">
+                <input className="input" value={form.vueloNumero} onChange={e => set('vueloNumero', e.target.value)} placeholder="Ej. AA1234" />
+              </Field>
+            </div>
+            <Field label="Hora de llegada">
+              <input className="input" type="time" value={form.vueloHoraLlegada} onChange={e => set('vueloHoraLlegada', e.target.value)} />
+            </Field>
+          </div>
+        )}
 
         <Field label="Fecha de devolución">
           <input className="input" type="date" value={form.fechaDevolucion} onChange={e => set('fechaDevolucion', e.target.value)} />
@@ -179,9 +361,14 @@ function NuevoContratoModal({ open, onClose }) {
 
         <Field label="Lugar de devolución">
           <select className="select" value={form.lugarDevolucion} onChange={e => set('lugarDevolucion', e.target.value)}>
-            {LUGARES.map(l => <option key={l}>{l}</option>)}
+            {PUNTOS.map(l => <option key={l}>{l}</option>)}
           </select>
         </Field>
+        {form.lugarDevolucion === 'Otro' && (
+          <Field label="Especifica el lugar de devolución">
+            <input className="input" value={form.lugarDevolucionOtro} onChange={e => set('lugarDevolucionOtro', e.target.value)} placeholder="Dirección o nombre del lugar" />
+          </Field>
+        )}
 
         <Field label="Notas">
           <textarea className="input resize-none" rows={2} value={form.notas} onChange={e => set('notas', e.target.value)} placeholder="Instrucciones especiales…" />
@@ -203,6 +390,8 @@ function NuevoContratoModal({ open, onClose }) {
 // ── Page ──────────────────────────────────────────────────────
 export default function Agenda() {
   const { contratos, loading } = useContratos()
+  const { flota } = useFlota()
+  const serviciosActivos = useServiciosActivos()
   const { can } = useAuth()
   const [filtro,     setFiltro]     = useState('todos')
   const [modalOpen,  setModalOpen]  = useState(false)
@@ -217,10 +406,33 @@ export default function Agenda() {
 
   const groups = useMemo(() => groupByDay(filtered), [filtered])
 
+  // Días donde aparece cada servicio empresarial: desde su fecha de inicio hasta hoy (sigue "en curso")
+  const hoyStr = format(new Date(), 'yyyy-MM-dd')
+  const serviciosPorDia = useMemo(() => {
+    if (filtro === 'devolucion' || filtro === 'urgente') return {}
+    const map = {}
+    serviciosActivos.forEach(s => {
+      if (!s.fechaInicio) return
+      // El día de inicio siempre aparece; "hoy" también aparece si ya inició (en curso)
+      const claves = new Set([s.fechaInicio])
+      if (s.fechaInicio <= hoyStr) claves.add(hoyStr)
+      claves.forEach(k => {
+        if (!map[k]) map[k] = []
+        map[k].push(s)
+      })
+    })
+    return map
+  }, [serviciosActivos, filtro, hoyStr])
+
+  // Combinar las claves de día de contratos + servicios empresariales
+  const todasLasClaves = useMemo(() => {
+    const set = new Set([...groups.map(([k]) => k), ...Object.keys(serviciosPorDia)])
+    return [...set].filter(k => k >= hoyStr).sort()
+  }, [groups, serviciosPorDia, hoyStr])
+
   // KPI counts
-  const hoy = format(new Date(), 'yyyy-MM-dd')
   const man  = format(addDays(new Date(), 1), 'yyyy-MM-dd')
-  const kpiHoy   = groups.find(([k]) => k === hoy)?.[1]?.length ?? 0
+  const kpiHoy   = (groups.find(([k]) => k === hoyStr)?.[1]?.length ?? 0) + (serviciosPorDia[hoyStr]?.length ?? 0)
   const kpiMan   = groups.find(([k]) => k === man)?.[1]?.length ?? 0
   const kpiSem   = contratos.length
   const kpiUrg   = contratos.filter(c => c.urgente).length
@@ -236,7 +448,7 @@ export default function Agenda() {
     <div className="p-4 sm:p-6 max-w-3xl mx-auto">
       <PageHeader
         title="Agenda"
-        subtitle="Entregas y devoluciones programadas"
+        subtitle="Entregas y devoluciones — turístico y empresarial"
         action={
           <div className="flex items-center gap-2 flex-wrap justify-end">
             <BtnAgendaDia contratos={contratos} fecha={new Date()} />
@@ -276,7 +488,7 @@ export default function Agenda() {
       </div>
 
       {/* Groups */}
-      {loading ? <Spinner /> : groups.length === 0 ? (
+      {loading ? <Spinner /> : todasLasClaves.length === 0 ? (
         <div className="card p-8 text-center text-gray-400 text-sm">
           No hay contratos programados.
           {can('admin') && (
@@ -287,19 +499,27 @@ export default function Agenda() {
             </div>
           )}
         </div>
-      ) : groups.map(([dayKey, events]) => (
-        <div key={dayKey} className="mb-6">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 capitalize">
-            {dayLabel(dayKey)}
-          </p>
-          <div className="flex flex-col gap-2">
-            {events
-              .sort((a, b) => (a.hora ?? '').localeCompare(b.hora ?? ''))
-              .map((ev, i) => <ContratoCard key={`${ev.id}-${ev._tipo}-${i}`} ev={ev} />)
-            }
+      ) : todasLasClaves.map(dayKey => {
+        const events = groups.find(([k]) => k === dayKey)?.[1] ?? []
+        const serviciosDia = serviciosPorDia[dayKey] ?? []
+        const esHoy = dayKey === hoyStr
+        return (
+          <div key={dayKey} className="mb-6">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 capitalize">
+              {dayLabel(dayKey)}
+            </p>
+            <div className="flex flex-col gap-2">
+              {events
+                .sort((a, b) => (a.hora ?? '').localeCompare(b.hora ?? ''))
+                .map((ev, i) => <ContratoCard key={`${ev.id}-${ev._tipo}-${i}`} ev={ev} />)
+              }
+              {serviciosDia.map(s => (
+                <ServicioEmpresarialCard key={s.id} s={s} esHoy={s.fechaInicio === dayKey} flota={flota} />
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
 
       <NuevoContratoModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
