@@ -9,6 +9,7 @@ import { db } from '../lib/firebase'
 const MODELOS = [
   'Dodge Attitude','Mitsubishi Xpander Cross','Toyota Corolla',
   'Dodge Grand Caravan','Toyota Hiace',
+  'Mitsubishi Outlander','Mitsubishi L200','Mitsubishi Montero Limited',
 ]
 const ESTADOS = ['disponible','rentada','mantenimiento','preparacion']
 const ESTADO_LABEL = {

@@ -88,8 +88,9 @@ function ContratoCard({ ev }) {
 
 // ── Modal nuevo contrato ──────────────────────────────────────
 const VEHICULOS = [
-  'Dodge Attitude','Mitsubishi Xpander Cross','Toyota Corolla',
+ 'Dodge Attitude','Mitsubishi Xpander Cross','Toyota Corolla',
   'Dodge Grand Caravan','Toyota Hiace',
+  'Mitsubishi Outlander','Mitsubishi L200','Mitsubishi Montero Limited',
 ]
 const LUGARES = [
   'Aeropuerto CUN T2','Aeropuerto CUN T3','Hotel Grand Hyatt',
