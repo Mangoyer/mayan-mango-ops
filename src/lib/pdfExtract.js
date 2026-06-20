@@ -41,18 +41,15 @@ async function extraerTextoPDF(file) {
     const page = await pdf.getPage(i)
     const content = await page.getTextContent()
 
-    // Cada item trae 'transform': [a, b, c, d, x, y] — x,y son la posición real.
-    const filas = new Map() // y agrupado -> [{x, str}]
+    const filas = new Map()
     for (const item of content.items) {
       if (!item.str.trim()) continue
       const x = item.transform[4]
-      const y = Math.round(item.transform[5] / 3) * 3 // tolerancia de agrupado
+      const y = Math.round(item.transform[5] / 3) * 3
       if (!filas.has(y)) filas.set(y, [])
       filas.get(y).push({ x, str: item.str })
     }
 
-    // En PDF el eje Y crece hacia ARRIBA, así que para leer de arriba a abajo
-    // ordenamos las filas de mayor a menor Y.
     const ysOrdenados = [...filas.keys()].sort((a, b) => b - a)
     const lineas = ysOrdenados.map(y =>
       filas.get(y).sort((a, b) => a.x - b.x).map(p => p.str).join(' ')
@@ -68,23 +65,47 @@ function dmyToISO(dmy) {
   return `${m[3]}-${m[2]}-${m[1]}`
 }
 
+// El nombre y apellido del cliente pueden venir en DOS órdenes distintos
+// según el documento:
+//   Caso A: "NOMBRE <NOMBRE_REAL>\n(first name): APELLIDOS (last name):"
+//   Caso B: "NOMBRE (first name): APELLIDOS (last name): <NOMBRE_REAL>"
+// Esta función cubre ambos casos: toma una ventana de texto alrededor de
+// "(first name)", elimina las etiquetas conocidas, y lo que sobra es el nombre.
+function extraerCliente(texto) {
+  const idx = texto.indexOf('(first name)')
+  if (idx === -1) return ''
+
+  const inicioBuscar = Math.max(0, idx - 60)
+  const inicioCorte = texto.lastIndexOf('\n', inicioBuscar)
+  const inicio = inicioCorte === -1 ? 0 : inicioCorte
+
+  const finMarker = texto.indexOf('FECHA DE NACIMIENTO', idx)
+  const fin = finMarker === -1 ? idx + 150 : finMarker
+
+  let ventana = texto.slice(inicio, fin)
+
+  const etiquetas = [
+    /NOMBRE\s*/gi, /\(first name\):?\s*/gi,
+    /APELLIDOS\s*/gi, /\(last name\):?\s*/gi,
+  ]
+  for (const re of etiquetas) ventana = ventana.replace(re, '')
+
+  const lineas = ventana.split('\n').map(l => l.trim()).filter(Boolean)
+  const candidatas = lineas.filter(l => /^[A-ZÁÉÍÓÚÑ\s]+$/.test(l))
+  return candidatas[0] ?? ''
+}
+
 // ── Contrato turístico (renta vehicular) ──────────────────────
 export function extraerContratoTuristico(texto) {
   const get = (regex) => texto.match(regex)?.[1]?.trim() ?? ''
 
   const folio = get(/FOLIO\s+(\d+)/i)
-
-  // El nombre y apellido completos vienen en la MISMA línea que la palabra "NOMBRE"
-  // (la reconstrucción por filas los junta), terminando antes del salto de línea.
-  const clienteRaw = get(/NOMBRE\s+([A-ZÁÉÍÓÚÑ\s]+?)\s*\n/i)
-  const cliente = clienteRaw.replace(/\s+/g, ' ').trim()
+  const cliente = extraerCliente(texto)
 
   const economico = get(/NUMERO ECONOMICO\s+([A-Z]\d+)/i)
   const serie     = get(/\b([A-Z0-9]{17})\b/)
-  const placa     = get(/PLACAS\(license\s+([A-Z0-9-]+)/i)
-
-  // Modelo del vehículo: línea inmediatamente arriba de "VEHICULO (vehicle):"
-  const vehiculo  = get(/\n([A-Z0-9ÁÉÍÓÚÑ\s]+?)\s+VEHICULO\s*\(vehicle\)/i)
+  // La placa viene justo después de la serie, pegada a "PLACAS(license"
+  const placa     = get(/[A-Z0-9]{17}\s+PLACAS\(license\s+([A-Z0-9-]+)/i)
 
   const fechaEntrega    = dmyToISO(get(/FECHA DE ENTREGA\s+(\d{2}\/\d{2}\/\d{4})/i))
   const fechaDevolucion = dmyToISO(get(/FECHA DE RETORNO\s+(\d{2}\/\d{2}\/\d{4})/i))
@@ -92,7 +113,7 @@ export function extraerContratoTuristico(texto) {
   const total = get(/TOTAL\s*(?:IVA INCLUIDO)?\s*\$?\s*([\d,]+\.?\d*)/i)
 
   return {
-    folio, cliente, economico, serie, placa, vehiculo,
+    folio, cliente, economico, serie, placa,
     fechaEntrega, fechaDevolucion, total,
     _camposExtraidos: [folio, cliente, economico, placa, fechaEntrega].filter(Boolean).length,
   }
@@ -105,13 +126,12 @@ export function extraerInventarioEmpresarial(texto) {
   const economico = get(/NUMERO ECONOMICO\s+([A-Z]\d+)/i)
   const empresa   = get(/ARRENDATARIO:?\s+([A-ZÁÉÍÓÚÑ0-9.\s]+?)\s*\n/i)
   const serie     = get(/\b([A-Z0-9]{17})\b/)
-  const placa     = get(/PLACAS\(license\s+([A-Z0-9-]+)/i)
-  const vehiculo  = get(/\n([A-Z0-9ÁÉÍÓÚÑ\s]+?)\s+VEHICULO\s*\(vehicle\)/i)
+  const placa     = get(/[A-Z0-9]{17}\s+PLACAS\(license\s+([A-Z0-9-]+)/i)
   const contratoMarco = get(/CONTRATO DE ARRENDAMIENTO VEHICULAR\s+(\d+)/i)
   const fechaEntrega  = dmyToISO(get(/FECHA DE ENTREGA\s+(\d{2}\/\d{2}\/\d{4})/i))
 
   return {
-    economico, empresa, serie, placa, vehiculo, contratoMarco, fechaEntrega,
+    economico, empresa, serie, placa, contratoMarco, fechaEntrega,
     _camposExtraidos: [economico, empresa, placa].filter(Boolean).length,
   }
 }
