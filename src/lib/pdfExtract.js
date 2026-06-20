@@ -70,14 +70,20 @@ function dmyToISO(dmy) {
 //   Caso A: "NOMBRE <NOMBRE_REAL>\n(first name): APELLIDOS (last name):"
 //   Caso B: "NOMBRE (first name): APELLIDOS (last name): <NOMBRE_REAL>"
 // Esta función cubre ambos casos: toma una ventana de texto alrededor de
-// "(first name)", elimina las etiquetas conocidas, y lo que sobra es el nombre.
+// "(first name)", elimina las etiquetas conocidas, descarta encabezados del
+// documento (CONTRATO DE ARRENDAMIENTO, DATOS DEL ARRENDADOR, etc.), y toma
+// la línea válida MÁS CERCANA a la etiqueta (la última de la ventana).
+const FRASES_NO_NOMBRE = [
+  'ARRENDAMIENTO', 'ARRENDADOR', 'CONTRATO', 'MATRIZ', 'SUCURSAL',
+]
+
 function extraerCliente(texto) {
   const idx = texto.indexOf('(first name)')
   if (idx === -1) return ''
 
-  const inicioBuscar = Math.max(0, idx - 60)
-  const inicioCorte = texto.lastIndexOf('\n', inicioBuscar)
-  const inicio = inicioCorte === -1 ? 0 : inicioCorte
+  let inicio = Math.max(0, idx - 100)
+  const inicioCorte = texto.lastIndexOf('\n', inicio)
+  if (inicioCorte !== -1) inicio = inicioCorte
 
   const finMarker = texto.indexOf('FECHA DE NACIMIENTO', idx)
   const fin = finMarker === -1 ? idx + 150 : finMarker
@@ -91,8 +97,11 @@ function extraerCliente(texto) {
   for (const re of etiquetas) ventana = ventana.replace(re, '')
 
   const lineas = ventana.split('\n').map(l => l.trim()).filter(Boolean)
-  const candidatas = lineas.filter(l => /^[A-ZÁÉÍÓÚÑ\s]+$/.test(l))
-  return candidatas[0] ?? ''
+  const candidatas = lineas.filter(l =>
+    /^[A-ZÁÉÍÓÚÑ\s]+$/.test(l) &&
+    !FRASES_NO_NOMBRE.some(frase => l.includes(frase))
+  )
+  return candidatas[candidatas.length - 1] ?? ''
 }
 
 // ── Contrato turístico (renta vehicular) ──────────────────────
@@ -104,7 +113,6 @@ export function extraerContratoTuristico(texto) {
 
   const economico = get(/NUMERO ECONOMICO\s+([A-Z]\d+)/i)
   const serie     = get(/\b([A-Z0-9]{17})\b/)
-  // La placa viene justo después de la serie, pegada a "PLACAS(license"
   const placa     = get(/[A-Z0-9]{17}\s+PLACAS\(license\s+([A-Z0-9-]+)/i)
 
   const fechaEntrega    = dmyToISO(get(/FECHA DE ENTREGA\s+(\d{2}\/\d{2}\/\d{4})/i))
