@@ -1,5 +1,5 @@
 /**
-* VERSION-FORZADA-20260620-1
+* VERSION-FORZADA-20260620-2
  * Extracción gratuita de datos de contratos PDF — sin IA, sin costo.
  * Usa pdf.js (cargado vía CDN) para leer el texto del PDF en el navegador,
  * y expresiones regulares para extraer los campos de la plantilla fija de Mayan Mango.
